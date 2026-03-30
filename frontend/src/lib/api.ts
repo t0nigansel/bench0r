@@ -1,4 +1,5 @@
-import type { Workspace } from '../types/workspace'
+import type { Workspace, WorkspaceFullState } from '../types/workspace'
+import type { AppNode, NodeType, NodeProperty } from '../types/node'
 
 const API_BASE = '/api'
 
@@ -41,4 +42,48 @@ export function deleteWorkspace(id: string): Promise<void> {
 
 export function getWorkspace(id: string): Promise<Workspace> {
   return apiFetch(`/workspaces/${id}`)
+}
+
+export function loadWorkspace(id: string): Promise<WorkspaceFullState> {
+  return apiFetch(`/workspaces/${id}/load`)
+}
+
+export function createNode(
+  workspaceId: string,
+  data: { type: NodeType; label: string; x_position: number; y_position: number },
+): Promise<AppNode> {
+  return apiFetch(`/workspaces/${workspaceId}/nodes`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateNode(
+  workspaceId: string,
+  nodeId: string,
+  data: { label?: string; x_position?: number; y_position?: number },
+): Promise<AppNode> {
+  return apiFetch(`/workspaces/${workspaceId}/nodes/${nodeId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteNode(workspaceId: string, nodeId: string): Promise<void> {
+  return apiFetch(`/workspaces/${workspaceId}/nodes/${nodeId}`, { method: 'DELETE' })
+}
+
+export function listNodeProperties(workspaceId: string, nodeId: string): Promise<NodeProperty[]> {
+  return apiFetch(`/workspaces/${workspaceId}/nodes/${nodeId}/properties`)
+}
+
+export function upsertNodeProperty(
+  workspaceId: string,
+  nodeId: string,
+  data: { key: string; value: string; value_type?: string },
+): Promise<NodeProperty> {
+  return apiFetch(`/workspaces/${workspaceId}/nodes/${nodeId}/properties`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
 }
