@@ -1,4 +1,4 @@
-import type { Workspace } from '../types/workspace'
+import type { Workspace, WorkspaceFullState } from '../types/workspace'
 
 const API_BASE = '/api'
 
@@ -41,4 +41,8 @@ export function deleteWorkspace(id: string): Promise<void> {
 
 export function getWorkspace(id: string): Promise<Workspace> {
   return apiFetch(`/workspaces/${id}`)
+}
+
+export function loadWorkspace(id: string): Promise<WorkspaceFullState> {
+  return apiFetch(`/workspaces/${id}/load`)
 }

@@ -7,8 +7,19 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::models::edge::Edge;
+use crate::models::node::Node;
+use crate::models::node_property::NodeProperty;
 use crate::models::workspace::Workspace;
 use crate::schemas::workspace::{CreateWorkspace, UpdateWorkspace};
+
+#[derive(serde::Serialize)]
+struct WorkspaceFullState {
+    workspace: Workspace,
+    nodes: Vec<Node>,
+    node_properties: Vec<NodeProperty>,
+    edges: Vec<Edge>,
+}
 
 async fn create_workspace(
     State(pool): State<PgPool>,
@@ -79,6 +90,49 @@ async fn delete_workspace(
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
+async fn load_workspace(
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<WorkspaceFullState>, AppError> {
+    let workspace = sqlx::query_as::<_, Workspace>("SELECT * FROM workspaces WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
+
+    let nodes = sqlx::query_as::<_, Node>(
+        "SELECT * FROM nodes WHERE workspace_id = $1 ORDER BY created_at",
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await?;
+
+    let node_ids: Vec<Uuid> = nodes.iter().map(|n| n.id).collect();
+    let node_properties = if node_ids.is_empty() {
+        vec![]
+    } else {
+        sqlx::query_as::<_, NodeProperty>(
+            "SELECT * FROM node_properties WHERE node_id = ANY($1) ORDER BY key",
+        )
+        .bind(&node_ids)
+        .fetch_all(&pool)
+        .await?
+    };
+
+    let edges = sqlx::query_as::<_, Edge>(
+        "SELECT * FROM edges WHERE workspace_id = $1 ORDER BY created_at",
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await?;
+
+    Ok(Json(WorkspaceFullState {
+        workspace,
+        nodes,
+        node_properties,
+        edges,
+    }))
+}
+
 pub fn router() -> Router<PgPool> {
     Router::new()
         .route("/api/workspaces", get(list_workspaces).post(create_workspace))
@@ -88,4 +142,5 @@ pub fn router() -> Router<PgPool> {
                 .put(update_workspace)
                 .delete(delete_workspace),
         )
+        .route("/api/workspaces/{id}/load", get(load_workspace))
 }
