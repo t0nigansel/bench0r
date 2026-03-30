@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ReactFlow,
@@ -17,6 +17,8 @@ import '@xyflow/react/dist/style.css'
 import type { WorkspaceFullState } from '../types/workspace'
 import type { NodeType } from '../types/node'
 import { loadWorkspace, createNode } from '../lib/api'
+import { nodeTypes } from '../components/nodes'
+import NodeDetailPanel from '../components/panels/NodeDetailPanel'
 
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
   AGENT: 'Agent',
@@ -25,30 +27,19 @@ const NODE_TYPE_LABELS: Record<NodeType, string> = {
   RULE: 'Rule',
 }
 
-const NODE_TYPE_STYLES: Record<NodeType, { background: string; border: string; borderRadius: string }> = {
-  AGENT: { background: '#dbeafe', border: '2px solid #3b82f6', borderRadius: '8px' },
-  DATASOURCE: { background: '#d1fae5', border: '2px solid #10b981', borderRadius: '50%' },
-  TOOL: { background: '#fef3c7', border: '2px solid #f59e0b', borderRadius: '4px 16px 4px 16px' },
-  RULE: { background: '#fce7f3', border: '2px solid #ec4899', borderRadius: '0' },
+const PALETTE_COLORS: Record<NodeType, { bg: string; border: string }> = {
+  AGENT: { bg: '#dbeafe', border: '#3b82f6' },
+  DATASOURCE: { bg: '#d1fae5', border: '#10b981' },
+  TOOL: { bg: '#fef3c7', border: '#f59e0b' },
+  RULE: { bg: '#fce7f3', border: '#ec4899' },
 }
 
 function makeFlowNode(id: string, nodeType: NodeType, label: string, x: number, y: number): Node {
-  const style = NODE_TYPE_STYLES[nodeType]
   return {
     id,
-    type: 'default',
+    type: nodeType,
     position: { x, y },
     data: { label, nodeType },
-    style: {
-      ...style,
-      width: 160,
-      minHeight: 50,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontSize: '13px',
-      fontWeight: 500,
-    },
   }
 }
 
@@ -81,11 +72,17 @@ export default function WorkspaceCanvasPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
 
-  const [selectedNode, setSelectedNode] = useState<Node | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null)
 
   const rfInstance = useRef<ReactFlowInstance | null>(null)
   const nodeCountRef = useRef(0)
+
+  // Derive selected node from nodes array so it stays in sync
+  const selectedNode = useMemo(
+    () => nodes.find((n) => n.id === selectedNodeId) ?? null,
+    [nodes, selectedNodeId]
+  )
 
   useEffect(() => {
     if (!id) return
@@ -108,15 +105,11 @@ export default function WorkspaceCanvasPage() {
     async (nodeType: NodeType) => {
       if (!id) return
 
-      // Compute a sensible default position:
-      // Center of the current viewport, offset by count to avoid stacking
       const offset = nodeCountRef.current * 30
       let x = 250 + offset
       let y = 150 + offset
 
       if (rfInstance.current) {
-        const viewport = rfInstance.current.getViewport()
-        // Place near center of visible area
         const canvasCenter = rfInstance.current.screenToFlowPosition({
           x: window.innerWidth / 2,
           y: window.innerHeight / 2,
@@ -139,8 +132,7 @@ export default function WorkspaceCanvasPage() {
         setNodes((prev) => [...prev, flowNode])
         nodeCountRef.current += 1
 
-        // Auto-select the new node
-        setSelectedNode(flowNode)
+        setSelectedNodeId(flowNode.id)
         setSelectedEdge(null)
         setSaveStatus('saved')
       } catch (err) {
@@ -149,6 +141,27 @@ export default function WorkspaceCanvasPage() {
       }
     },
     [id, setNodes]
+  )
+
+  const handleLabelChange = useCallback(
+    (nodeId: string, newLabel: string) => {
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === nodeId ? { ...n, data: { ...n.data, label: newLabel } } : n
+        )
+      )
+    },
+    [setNodes]
+  )
+
+  const handleDeleteNode = useCallback(
+    (nodeId: string) => {
+      setNodes((prev) => prev.filter((n) => n.id !== nodeId))
+      setEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId))
+      setSelectedNodeId(null)
+      nodeCountRef.current = Math.max(0, nodeCountRef.current - 1)
+    },
+    [setNodes, setEdges]
   )
 
   const onConnect: OnConnect = useCallback(
@@ -160,7 +173,7 @@ export default function WorkspaceCanvasPage() {
 
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
-      setSelectedNode(node)
+      setSelectedNodeId(node.id)
       setSelectedEdge(null)
     },
     []
@@ -169,13 +182,13 @@ export default function WorkspaceCanvasPage() {
   const onEdgeClick = useCallback(
     (_event: React.MouseEvent, edge: Edge) => {
       setSelectedEdge(edge)
-      setSelectedNode(null)
+      setSelectedNodeId(null)
     },
     []
   )
 
   const onPaneClick = useCallback(() => {
-    setSelectedNode(null)
+    setSelectedNodeId(null)
     setSelectedEdge(null)
   }, [])
 
@@ -216,7 +229,7 @@ export default function WorkspaceCanvasPage() {
             >
               <span
                 className="inline-block w-3 h-3 rounded-sm mr-2 align-middle"
-                style={{ background: NODE_TYPE_STYLES[type].background, border: NODE_TYPE_STYLES[type].border }}
+                style={{ background: PALETTE_COLORS[type].bg, border: `2px solid ${PALETTE_COLORS[type].border}` }}
               />
               {NODE_TYPE_LABELS[type]}
             </button>
@@ -233,6 +246,7 @@ export default function WorkspaceCanvasPage() {
             <ReactFlow
               nodes={nodes}
               edges={edges}
+              nodeTypes={nodeTypes}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onNodeClick={onNodeClick}
@@ -257,8 +271,16 @@ export default function WorkspaceCanvasPage() {
 
         {/* Right detail panel */}
         <div className="w-72 bg-white border-l border-gray-200 p-4 shrink-0 overflow-y-auto">
-          {selectedNode ? (
-            <NodeDetailPanel node={selectedNode} />
+          {selectedNode && id ? (
+            <NodeDetailPanel
+              workspaceId={id}
+              nodeId={selectedNode.id}
+              nodeType={(selectedNode.data as { nodeType: NodeType }).nodeType}
+              label={String(selectedNode.data.label)}
+              onLabelChange={handleLabelChange}
+              onDelete={handleDeleteNode}
+              onSaveStatusChange={setSaveStatus}
+            />
           ) : selectedEdge ? (
             <EdgeDetailPanel edge={selectedEdge} />
           ) : (
@@ -302,24 +324,6 @@ function TopBar({
   )
 }
 
-function NodeDetailPanel({ node }: { node: Node }) {
-  const nodeType = (node.data as { nodeType?: string })?.nodeType ?? 'Unknown'
-  const label = (node.data as { label?: string })?.label ?? ''
-
-  return (
-    <div>
-      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-        {nodeType} Node
-      </p>
-      <div className="mb-3">
-        <label className="block text-xs text-gray-500 mb-1">Label</label>
-        <p className="text-sm text-gray-800 font-medium">{label}</p>
-      </div>
-      <p className="text-xs text-gray-400 mt-4">Editing coming soon.</p>
-    </div>
-  )
-}
-
 function EdgeDetailPanel({ edge }: { edge: Edge }) {
   return (
     <div>
@@ -338,7 +342,6 @@ function EdgeDetailPanel({ edge }: { edge: Edge }) {
           <p className="text-sm text-gray-700">{String(edge.label)}</p>
         </div>
       )}
-      <p className="text-xs text-gray-400 mt-4">Editing coming soon.</p>
     </div>
   )
 }
