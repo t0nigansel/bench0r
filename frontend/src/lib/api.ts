@@ -1,6 +1,8 @@
+import type { Workspace } from '../types/workspace'
+
 const API_BASE = '/api'
 
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -13,4 +15,30 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     throw new Error(`API ${res.status}: ${body}`)
   }
   return res.json()
+}
+
+export function listWorkspaces(): Promise<Workspace[]> {
+  return apiFetch('/workspaces')
+}
+
+export function createWorkspace(name: string, description?: string): Promise<Workspace> {
+  return apiFetch('/workspaces', {
+    method: 'POST',
+    body: JSON.stringify({ name, description }),
+  })
+}
+
+export function updateWorkspace(id: string, data: { name?: string; description?: string }): Promise<Workspace> {
+  return apiFetch(`/workspaces/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteWorkspace(id: string): Promise<void> {
+  return apiFetch(`/workspaces/${id}`, { method: 'DELETE' })
+}
+
+export function getWorkspace(id: string): Promise<Workspace> {
+  return apiFetch(`/workspaces/${id}`)
 }
