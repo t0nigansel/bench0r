@@ -29,6 +29,7 @@ async fn main() {
     let app = Router::new()
         .merge(routes::health::router())
         .merge(routes::workspaces::router())
+        .merge(routes::nodes::router())
         .layer(cors)
         .with_state(pool);
 

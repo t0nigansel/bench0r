@@ -1,4 +1,5 @@
 import type { Workspace, WorkspaceFullState } from '../types/workspace'
+import type { AppNode, NodeType } from '../types/node'
 
 const API_BASE = '/api'
 
@@ -45,4 +46,14 @@ export function getWorkspace(id: string): Promise<Workspace> {
 
 export function loadWorkspace(id: string): Promise<WorkspaceFullState> {
   return apiFetch(`/workspaces/${id}/load`)
+}
+
+export function createNode(
+  workspaceId: string,
+  data: { type: NodeType; label: string; x_position: number; y_position: number },
+): Promise<AppNode> {
+  return apiFetch(`/workspaces/${workspaceId}/nodes`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
 }

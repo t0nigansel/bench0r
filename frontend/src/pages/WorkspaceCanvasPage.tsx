@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ReactFlow,
@@ -9,13 +9,14 @@ import {
   useNodesState,
   useEdgesState,
   type OnConnect,
+  type ReactFlowInstance,
   MarkerType,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
 import type { WorkspaceFullState } from '../types/workspace'
 import type { NodeType } from '../types/node'
-import { loadWorkspace } from '../lib/api'
+import { loadWorkspace, createNode } from '../lib/api'
 
 const NODE_TYPE_LABELS: Record<NodeType, string> = {
   AGENT: 'Agent',
@@ -31,26 +32,30 @@ const NODE_TYPE_STYLES: Record<NodeType, { background: string; border: string; b
   RULE: { background: '#fce7f3', border: '2px solid #ec4899', borderRadius: '0' },
 }
 
+function makeFlowNode(id: string, nodeType: NodeType, label: string, x: number, y: number): Node {
+  const style = NODE_TYPE_STYLES[nodeType]
+  return {
+    id,
+    type: 'default',
+    position: { x, y },
+    data: { label, nodeType },
+    style: {
+      ...style,
+      width: 160,
+      minHeight: 50,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '13px',
+      fontWeight: 500,
+    },
+  }
+}
+
 function toFlowNodes(state: WorkspaceFullState): Node[] {
-  return state.nodes.map((n) => {
-    const style = NODE_TYPE_STYLES[n.type as NodeType] ?? NODE_TYPE_STYLES.AGENT
-    return {
-      id: n.id,
-      type: 'default',
-      position: { x: n.x_position, y: n.y_position },
-      data: { label: n.label, nodeType: n.type },
-      style: {
-        ...style,
-        width: 160,
-        minHeight: 50,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '13px',
-        fontWeight: 500,
-      },
-    }
-  })
+  return state.nodes.map((n) =>
+    makeFlowNode(n.id, n.type as NodeType, n.label, n.x_position, n.y_position)
+  )
 }
 
 function toFlowEdges(state: WorkspaceFullState): Edge[] {
@@ -79,20 +84,72 @@ export default function WorkspaceCanvasPage() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [selectedEdge, setSelectedEdge] = useState<Edge | null>(null)
 
+  const rfInstance = useRef<ReactFlowInstance | null>(null)
+  const nodeCountRef = useRef(0)
+
   useEffect(() => {
     if (!id) return
     setLoading(true)
     loadWorkspace(id)
       .then((state) => {
         setWorkspaceName(state.workspace.name)
-        setNodes(toFlowNodes(state))
+        const flowNodes = toFlowNodes(state)
+        setNodes(flowNodes)
         setEdges(toFlowEdges(state))
+        nodeCountRef.current = flowNodes.length
       })
       .catch((err) =>
         setError(err instanceof Error ? err.message : 'Failed to load workspace')
       )
       .finally(() => setLoading(false))
   }, [id, setNodes, setEdges])
+
+  const handleAddNode = useCallback(
+    async (nodeType: NodeType) => {
+      if (!id) return
+
+      // Compute a sensible default position:
+      // Center of the current viewport, offset by count to avoid stacking
+      const offset = nodeCountRef.current * 30
+      let x = 250 + offset
+      let y = 150 + offset
+
+      if (rfInstance.current) {
+        const viewport = rfInstance.current.getViewport()
+        // Place near center of visible area
+        const canvasCenter = rfInstance.current.screenToFlowPosition({
+          x: window.innerWidth / 2,
+          y: window.innerHeight / 2,
+        })
+        x = canvasCenter.x - 80 + offset
+        y = canvasCenter.y - 25 + offset
+      }
+
+      const label = `New ${NODE_TYPE_LABELS[nodeType]}`
+
+      setSaveStatus('saving')
+      try {
+        const created = await createNode(id, {
+          type: nodeType,
+          label,
+          x_position: x,
+          y_position: y,
+        })
+        const flowNode = makeFlowNode(created.id, nodeType, created.label, created.x_position, created.y_position)
+        setNodes((prev) => [...prev, flowNode])
+        nodeCountRef.current += 1
+
+        // Auto-select the new node
+        setSelectedNode(flowNode)
+        setSelectedEdge(null)
+        setSaveStatus('saved')
+      } catch (err) {
+        setSaveStatus('error')
+        console.error('Failed to create node:', err)
+      }
+    },
+    [id, setNodes]
+  )
 
   const onConnect: OnConnect = useCallback(
     (_connection) => {
@@ -122,8 +179,6 @@ export default function WorkspaceCanvasPage() {
     setSelectedEdge(null)
   }, [])
 
-  // void usage to suppress lint warning
-  void setSaveStatus
   void onConnect
 
   if (error) {
@@ -156,9 +211,8 @@ export default function WorkspaceCanvasPage() {
           {(Object.keys(NODE_TYPE_LABELS) as NodeType[]).map((type) => (
             <button
               key={type}
-              className="text-left px-3 py-2 text-sm rounded-md border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-              title={`Add ${NODE_TYPE_LABELS[type]} (coming soon)`}
-              disabled
+              onClick={() => handleAddNode(type)}
+              className="text-left px-3 py-2 text-sm rounded-md border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors cursor-pointer"
             >
               <span
                 className="inline-block w-3 h-3 rounded-sm mr-2 align-middle"
@@ -184,6 +238,7 @@ export default function WorkspaceCanvasPage() {
               onNodeClick={onNodeClick}
               onEdgeClick={onEdgeClick}
               onPaneClick={onPaneClick}
+              onInit={(instance) => { rfInstance.current = instance }}
               fitView
               fitViewOptions={{ padding: 0.3 }}
             >
